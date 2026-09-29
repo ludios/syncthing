@@ -1,3 +1,4 @@
+// Model-output: Claude Opus 5.5
 // Copyright (C) 2016 The Syncthing Authors.
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
@@ -602,6 +603,98 @@ func testWatchOutput(t *testing.T, name string, in <-chan Event, expectedEvents,
 		}
 		delete(expected, received)
 		last = received
+	}
+}
+
+func TestEnclosingGitDir(t *testing.T) {
+	for name, want := range map[string]string{
+		".git":                    ".git",
+		".git/objects/ab":         ".git",
+		"sub/.git/refs/heads/foo": "sub/.git",
+		"a/.git/b/.git/c":         "a/.git",
+		".gitignore":              "",
+		"x/.github/y":             "",
+		"x.git/y":                 "",
+		"git/y":                   "",
+	} {
+		got, ok := enclosingGitDir(filepath.FromSlash(name))
+		if ok != (want != "") || got != filepath.FromSlash(want) {
+			t.Errorf("enclosingGitDir(%q) = %q, %v; want %q", name, got, ok, want)
+		}
+	}
+}
+
+// TestWatchGitDir checks that directories appearing or going away inside a
+// git directory are reported as the git directory changing, and that other
+// changes (files, directory metadata, directories elsewhere) are reported as
+// themselves.
+func TestWatchGitDir(t *testing.T) {
+	if !build.IsLinux {
+		t.Skip("only implemented for inotify")
+	}
+	name := "gitdir"
+	gitDir := filepath.Join(name, ".git")
+	objects := filepath.Join(gitDir, "objects")
+	refs := filepath.Join(gitDir, "refs")
+	for _, dir := range []string{filepath.Join(objects, "cd"), filepath.Join(objects, "ef"), refs} {
+		if err := testFs.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer testFs.RemoveAll(name)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventChan, _, err := testFs.Watch(name, fakeMatcher{}, ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []func() error{
+		func() error { return testFs.Mkdir(filepath.Join(objects, "ab"), 0o755) },
+		func() error { return testFs.Remove(filepath.Join(objects, "cd")) },
+		func() error { return testFs.Rename(filepath.Join(objects, "ef"), filepath.Join(objects, "gh")) },
+		func() error { return testFs.Chmod(refs, 0o700) },
+		func() error { return testFs.Mkdir(filepath.Join(name, "other"), 0o755) },
+	} {
+		if err := op(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	createTestFile(gitDir, "index")
+
+	want := map[Event]bool{
+		{gitDir, NonRemove}:                         true,
+		{refs, NonRemove}:                           true,
+		{filepath.Join(name, "other"), NonRemove}:   true,
+		{filepath.Join(gitDir, "index"), NonRemove}: true,
+	}
+	got := make(map[Event]bool)
+	missing := len(want)
+	for timeout := time.After(5 * time.Second); missing > 0; {
+		select {
+		case ev := <-eventChan:
+			if want[ev] && !got[ev] {
+				missing--
+			}
+			got[ev] = true
+		case <-timeout:
+			t.Fatalf("got %v; want all of %v", got, want)
+		}
+	}
+	// Give events that should not come a moment to show up.
+	for grace := time.After(300 * time.Millisecond); ; {
+		select {
+		case ev := <-eventChan:
+			got[ev] = true
+			continue
+		case <-grace:
+		}
+		break
+	}
+	for ev := range got {
+		if strings.HasPrefix(ev.Name, objects) {
+			t.Errorf("unexpected event %v: directories added or removed in .git should be reported as .git", ev)
+		}
 	}
 }
 

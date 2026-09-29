@@ -1,3 +1,4 @@
+// Model-output: Claude Opus 5.5
 // Copyright (C) 2016 The Syncthing Authors.
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
@@ -14,6 +15,8 @@ package fs
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/syncthing/notify"
@@ -64,6 +67,36 @@ func (f *BasicFilesystem) Watch(name string, ignore Matcher, ctx context.Context
 	return outChan, errChan, nil
 }
 
+// enclosingGitDir returns the path of the outermost .git in name (the git
+// directory, or a gitfile pointing to one), or name itself if that is .git,
+// and whether there is one. Bare repositories (foo.git) are not recognised.
+func enclosingGitDir(name string) (string, bool) {
+	slashed := "/" + filepath.ToSlash(name) + "/"
+	i := strings.Index(slashed, "/.git/")
+	if i < 0 {
+		return "", false
+	}
+	return filepath.FromSlash(slashed[1 : i+len("/.git")]), true
+}
+
+// watchEvent returns the event to report for relPath changing, as ev says.
+//
+// Directories are created, removed and renamed inside git directories all the
+// time (gc prunes .git/objects/xx, commits recreate them), and changes around
+// that are what the watcher has missed. So a directory appearing or going away
+// inside a git directory is reported as a change of the whole git directory:
+// it gets rescanned shortly after, finding whatever else changed there
+// unreported.
+func (f *BasicFilesystem) watchEvent(relPath string, ev notify.EventInfo) Event {
+	if dirAddedOrRemoved(ev.Sys()) {
+		if gitDir, ok := enclosingGitDir(relPath); ok {
+			l.Debugln(f.Type(), f.URI(), "Watch: Directory", relPath, "added or removed, rescanning", gitDir)
+			return Event{Name: gitDir, Type: NonRemove}
+		}
+	}
+	return Event{Name: relPath, Type: f.eventType(ev.Event())}
+}
+
 func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []string, backendChan chan notify.EventInfo, outChan chan<- Event, errChan chan<- error, ignore Matcher) {
 	for {
 		// Detect channel overflow
@@ -106,10 +139,10 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 				l.Debugln(f.Type(), f.URI(), "Watch: Ignoring", relPath)
 				continue
 			}
-			evType := f.eventType(ev.Event())
+			event := f.watchEvent(relPath, ev)
 			select {
-			case outChan <- Event{Name: relPath, Type: evType}:
-				l.Debugln(f.Type(), f.URI(), "Watch: Sending", relPath, evType)
+			case outChan <- event:
+				l.Debugln(f.Type(), f.URI(), "Watch: Sending", event.Name, event.Type)
 			case <-ctx.Done():
 				notify.Stop(backendChan)
 				l.Debugln(f.Type(), f.URI(), "Watch: Stopped")
