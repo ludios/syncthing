@@ -1859,14 +1859,10 @@ angular.module('syncthing.core')
                 var themeChanged = $scope.config.gui.theme !== $scope.tmpGUI.theme;
                 // Angular has issues with selects with numeric values, so we handle strings here.
                 $scope.tmpOptions.urAccepted = parseInt($scope.tmpOptions._urAcceptedStr);
-                // Check if auto-upgrade has been enabled or disabled. This
-                // also has an effect on usage reporting, so do the check
-                // for that later.
+                // Check if auto-upgrade has been enabled or disabled.
                 if ($scope.tmpOptions.upgrades == "candidate") {
                     $scope.tmpOptions.autoUpgradeIntervalH = $scope.tmpOptions.autoUpgradeIntervalH || 12;
                     $scope.tmpOptions.upgradeToPreReleases = true;
-                    $scope.tmpOptions.urAccepted = $scope.system.urVersionMax;
-                    $scope.tmpOptions.urSeen = $scope.system.urVersionMax;
                 } else if ($scope.tmpOptions.upgrades == "stable") {
                     $scope.tmpOptions.autoUpgradeIntervalH = $scope.tmpOptions.autoUpgradeIntervalH || 12;
                     $scope.tmpOptions.upgradeToPreReleases = false;

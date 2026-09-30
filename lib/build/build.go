@@ -88,8 +88,7 @@ func setBuildData() {
 	// This is used to enable some extra debugging (the deadlock detector).
 	//
 	// Release candidate builds are also "betas" from this point of view and
-	// will have that debugging enabled. In addition, some features are
-	// forced for release candidates - auto upgrade, and usage reporting.
+	// will have that debugging enabled.
 
 	exp := regexp.MustCompile(`^v\d+\.\d+\.\d+(-[a-z]+[\d\.]+)?$`)
 	IsRelease = exp.MatchString(Version)
