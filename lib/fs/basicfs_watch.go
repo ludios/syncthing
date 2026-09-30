@@ -27,6 +27,10 @@ import (
 // Not meant to be changed, but must be changeable for tests
 var backendBuffer = 500
 
+// errInotifyLimits is the error watching fails with when the inotify limits
+// were reached; the same each time, so that the folder does not warn again.
+var errInotifyLimits = errors.New("failed to set up inotify handler. Please increase inotify limits, see https://docs.syncthing.net/users/faq.html#inotify-limits")
+
 func (f *BasicFilesystem) Watch(name string, ignore Matcher, ctx context.Context, ignorePerms bool) (<-chan Event, <-chan error, error) {
 	watchPath, roots, err := f.watchPaths(name)
 	if err != nil {
@@ -55,7 +59,10 @@ func (f *BasicFilesystem) Watch(name string, ignore Matcher, ctx context.Context
 	err = notify.WatchWithFilter(watchPath, backendChan, absShouldIgnore, eventMask)
 	if err != nil {
 		notify.Stop(backendChan)
-		return nil, nil, explainWatchError(err)
+		if reachedMaxUserWatches(err) {
+			err = errInotifyLimits
+		}
+		return nil, nil, err
 	}
 
 	errChan := make(chan error)
@@ -94,26 +101,41 @@ func (f *BasicFilesystem) watchEvent(relPath string, ev notify.EventInfo) Event 
 	return Event{Name: relPath, Type: f.eventType(ev.Event())}
 }
 
-// explainWatchError returns err, or if it means that the inotify limits were
-// reached, an error saying to increase them.
-func explainWatchError(err error) error {
-	if reachedMaxUserWatches(err) {
-		return errors.New("failed to set up inotify handler. Please increase inotify limits, see https://docs.syncthing.net/users/faq.html#inotify-limits")
+// reachedLimits reports whether ev says that notify could not watch a
+// directory after Watch returned because the inotify limits were reached.
+func reachedLimits(ev notify.EventInfo) bool {
+	werr, ok := ev.(*notify.WatchError)
+	return ok && reachedMaxUserWatches(werr)
+}
+
+// stopWatch stops the backend watch, then sends err on errChan unless ctx is
+// done first; stopping first lets a new watch of the folder start afresh.
+func (f *BasicFilesystem) stopWatch(ctx context.Context, backendChan chan notify.EventInfo, errChan chan<- error, err error) {
+	notify.Stop(backendChan)
+	select {
+	case errChan <- err:
+		l.Debugln(f.Type(), f.URI(), "Watch: Stopped due to", err)
+	case <-ctx.Done():
 	}
-	return err
 }
 
 func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []string, backendChan chan notify.EventInfo, outChan chan<- Event, errChan chan<- error, ignore Matcher) {
 	for {
 		// Detect channel overflow
 		if len(backendChan) == backendBuffer {
+			limits := false
 		outer:
 			for {
 				select {
-				case <-backendChan:
+				case ev := <-backendChan:
+					limits = limits || reachedLimits(ev)
 				default:
 					break outer
 				}
+			}
+			if limits {
+				f.stopWatch(ctx, backendChan, errChan, errInotifyLimits)
+				return
 			}
 			// When next scheduling a scan, do it on the entire folder as events have been lost.
 			outChan <- Event{Name: name, Type: NonRemove}
@@ -122,10 +144,12 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 
 		select {
 		case ev := <-backendChan:
-			// notify could not watch a directory after Watch returned, so
-			// changes in it would go unnoticed.
-			if werr, ok := ev.(*notify.WatchError); ok {
-				f.stopWatch(ctx, backendChan, errChan, explainWatchError(werr.Err))
+			// notify could not watch a directory after Watch returned. For the
+			// inotify limits, watching is started again once they are raised;
+			// otherwise the *notify.WatchError is taken as a change of the
+			// directory below, for the scanner to find what is wrong with it.
+			if reachedLimits(ev) {
+				f.stopWatch(ctx, backendChan, errChan, errInotifyLimits)
 				return
 			}
 
@@ -161,18 +185,6 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 			return
 		}
 	}
-}
-
-// stopWatch stops the backend watch after err, sending err on errChan unless
-// ctx is done first.
-func (f *BasicFilesystem) stopWatch(ctx context.Context, backendChan chan notify.EventInfo, errChan chan<- error, err error) {
-	select {
-	case errChan <- err:
-		l.Debugln(f.Type(), f.URI(), "Watch: Sending error", err)
-	case <-ctx.Done():
-	}
-	notify.Stop(backendChan)
-	l.Debugln(f.Type(), f.URI(), "Watch: Stopped due to", err)
 }
 
 func (*BasicFilesystem) eventType(notifyType notify.Event) EventType {

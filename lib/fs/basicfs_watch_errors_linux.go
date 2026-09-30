@@ -1,3 +1,4 @@
+// Model-output: Claude Opus 5.5
 // Copyright (C) 2016 The Syncthing Authors.
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
@@ -9,15 +10,11 @@
 package fs
 
 import (
-	"os"
+	"errors"
 	"syscall"
 )
 
 func reachedMaxUserWatches(err error) bool {
-	if pathErr, ok := err.(*os.PathError); ok {
-		if errno, ok := pathErr.Err.(syscall.Errno); ok {
-			return errno == 24 || errno == 28
-		}
-	}
-	return false
+	var errno syscall.Errno
+	return errors.As(err, &errno) && (errno == syscall.EMFILE || errno == syscall.ENOSPC)
 }

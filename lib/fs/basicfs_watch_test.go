@@ -216,32 +216,47 @@ func TestWatchOutside(t *testing.T) {
 }
 
 func expectErrorForPath(t *testing.T, path string) {
-	expectWatchError(t, fakeEventInfo(path))
+	t.Helper()
+	if ev, _ := watchLoopOutput(t, fakeEventInfo(path)); ev != nil {
+		t.Errorf("Unexpected passed through event %v", *ev)
+	}
 }
 
 // TestWatchErrorFromBackend checks that a directory notify could not watch
-// after Watch returned stops the watch with an error, which says to raise the
-// inotify limits if they were hit.
+// after Watch returned stops the watch only if the inotify limits were
+// reached, also when the backend channel overflowed; otherwise the directory
+// is to be scanned.
 func TestWatchErrorFromBackend(t *testing.T) {
-	err := expectWatchError(t, &notify.WatchError{Err: &os.PathError{
-		Op:   "watch",
-		Path: filepath.Join(testDirAbs, "dir"),
-		Err:  syscall.ENOSPC,
-	}})
-	if err == nil {
+	werr := func(errno syscall.Errno) *notify.WatchError {
+		dir := filepath.Join(testDirAbs, "dir")
+		return &notify.WatchError{Dir: dir, Err: &os.PathError{Op: "watch", Path: dir, Err: errno}}
+	}
+	if ev, err := watchLoopOutput(t, werr(syscall.EACCES)); ev == nil || *ev != (Event{Name: "dir", Type: NonRemove}) {
+		t.Errorf("Got %v, %v; want the directory scanned", ev, err)
+	}
+	if !build.IsLinux {
 		return
 	}
-	if build.IsLinux != strings.Contains(err.Error(), "increase inotify limits") {
-		t.Errorf("Unexpected error %v", err)
+	full := []notify.EventInfo{werr(syscall.ENOSPC)}
+	for len(full) < backendBuffer {
+		full = append(full, fakeEventInfo(filepath.Join(testDirAbs, "file")))
+	}
+	for _, evs := range [][]notify.EventInfo{full[:1], full} {
+		if _, err := watchLoopOutput(t, evs...); err != errInotifyLimits {
+			t.Errorf("Got error %v after %d events; want the inotify limits one", err, len(evs))
+		}
 	}
 }
 
-// expectWatchError returns the error watchLoop stops with when the backend
-// sends ev, or nil after failing t.
-func expectWatchError(t *testing.T, ev notify.EventInfo) error {
+// watchLoopOutput runs watchLoop with evs as what the backend sent, and
+// returns the first event or error it gives, failing t if none comes.
+func watchLoopOutput(t *testing.T, evs ...notify.EventInfo) (*Event, error) {
 	t.Helper()
 	outChan := make(chan Event)
 	backendChan := make(chan notify.EventInfo, backendBuffer)
+	for _, ev := range evs {
+		backendChan <- ev
+	}
 	errChan := make(chan error)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -259,17 +274,15 @@ func expectWatchError(t *testing.T, ev notify.EventInfo) error {
 		<-done
 	}()
 
-	backendChan <- ev
-
 	select {
 	case <-time.After(10 * time.Second):
-		t.Errorf("Timed out before receiving error")
-	case e := <-outChan:
-		t.Errorf("Unexpected passed through event %v", e)
+		t.Fatal("Timed out before receiving an event or error")
+	case ev := <-outChan:
+		return &ev, nil
 	case err := <-errChan:
-		return err
+		return nil, err
 	}
-	return nil
+	return nil, nil
 }
 
 func TestWatchSubpath(t *testing.T) {
