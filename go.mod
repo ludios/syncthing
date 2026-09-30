@@ -1,3 +1,4 @@
+// Model-output: Claude Opus 5.5
 module github.com/syncthing/syncthing
 
 go 1.26.2
@@ -116,3 +117,8 @@ tool (
 	github.com/maxbrunsfeld/counterfeiter/v6
 	golang.org/x/tools/cmd/goimports
 )
+
+// Branch prime of this fork fixes the inotify watcher missing changes: it
+// recovers from queue overflows, and it watches directories recreated where
+// one was removed (syncthing#7879, #9612). Drop it once upstream notify does.
+replace github.com/syncthing/notify => github.com/ludios/notify v0.0.0-20260929202819-803f00a9f79f
