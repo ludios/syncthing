@@ -3,7 +3,7 @@
 # Don't edit the generated sections here: change the options below or the template, then run `clank-right update .` in this repo.
 # Only the options below and the sections between "Thoughts for when there is programming involved" and "After making changes" are this project's own; every other section is overwritten.
 
-languages = ["go", "javascript"]
+languages = ["go"]
 -->
 
 # Environment
@@ -35,10 +35,6 @@ Always let the user know about any discovered opportunities for simplification.
 
 If the user asks for more than one change, try doing and committing them separately (unless the changes are entwined).
 
-# Working with Node projects
-
-npm sux; please use pnpm instead.
-
 # There's plenty of time
 
 If more external information is needed, think and keep iterating on web search queries to thoroughly check things. Tips: try site-specific searches e.g. site:github.com, reddit.com, news.ycombinator.com; try combinations of quoted items.
@@ -51,20 +47,7 @@ Files with any LLM-authored code (not counting mechanistic sed-like changes) beg
 
 # Code conventions
 
-For JavaScript, TypeScript, and Svelte-related code:
-
-- Use tabs to indent and spaces to align.
-- `snake_case` function names and local variables, except those imported from external libraries or in the platform itself.
-- Use semicolons after statements; no ASI.
-- Classes should be used when:
-
-	1. You have anything like a state machine, or functions closing over the same state. \
-	   They help us organize and know which state is shared between related functions.
-	2. Integrating with an API properly, e.g. making an Error subclass.
-
-  Otherwise, plain functions are generally fine.
-
-When writing _any_ kind of code, including for the above:
+When writing _any_ kind of code:
 
 - Think about invariants and add asserts or domain-specific errors where they might prevent misbehavior.
 - Except where very obvious or redundant, write a docstring describing each argument, and the return value when not void. What do they really represent?
@@ -74,9 +57,6 @@ When writing _any_ kind of code, including for the above:
 
 Minutae:
 
-- Use the { } curlies even for one-statement blocks.
-- Block contents should not be on the same line that opened the block.
-- Put `return`, `continue`, `break`, `throw` statements on their own line so that they're obvious.
 - Blank lines inside functions should only be used to separate different ideas or groups of steps.
 - Use space-based alignment but only where it looks good: on adjacent lines with a very similar structure, add spaces after shorter identifiers (or the syntax to the right of them) to align things.
 
@@ -101,15 +81,9 @@ When there are multiple good ways to implement something, especially involving s
 
 # After making changes
 
-At the workspace root:
-
-	pnpm lint  # runs oxlint
-	pnpm check # runs tsc
-	pnpm test  # runs vitest
-
 Never `git commit -a` because there may be others working; stage changes manually.
 
-Then automatically commit your changes with this commit template:
+Automatically commit your changes with this commit template:
 
 	subsystem: short one-line description; semicolon if multiple changes
 
