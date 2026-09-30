@@ -67,11 +67,11 @@ func (f *BasicFilesystem) Watch(name string, ignore Matcher, ctx context.Context
 	return outChan, errChan, nil
 }
 
-// enclosingGitDir returns the path of the outermost .git in name (the git
-// directory, or a gitfile pointing to one), or name itself if that is .git,
-// and whether there is one. Bare repositories (foo.git) are not recognised.
+// enclosingGitDir returns the path of the outermost .git directory that name
+// is inside of, and whether there is one. Bare repositories (foo.git) are not
+// recognised.
 func enclosingGitDir(name string) (string, bool) {
-	slashed := "/" + filepath.ToSlash(name) + "/"
+	slashed := "/" + filepath.ToSlash(name)
 	i := strings.Index(slashed, "/.git/")
 	if i < 0 {
 		return "", false

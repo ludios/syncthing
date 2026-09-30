@@ -6,13 +6,12 @@
 // You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //go:build !linux
-// +build !linux
 
 package fs
 
 // dirAddedOrRemoved reports whether sys, the watcher's system-specific event
 // data, says a directory was created, deleted or moved in or out; that is
 // only implemented for inotify.
-func dirAddedOrRemoved(interface{}) bool {
+func dirAddedOrRemoved(any) bool {
 	return false
 }

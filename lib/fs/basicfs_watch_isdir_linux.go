@@ -6,7 +6,6 @@
 // You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //go:build linux
-// +build linux
 
 package fs
 
@@ -16,7 +15,7 @@ import "golang.org/x/sys/unix"
 // data, says a directory was created, deleted or moved in or out. inotify says
 // so even for a directory that is gone. Events about a watch itself (deleted
 // or moved) never carry IN_ISDIR, but only directories are watched.
-func dirAddedOrRemoved(sys interface{}) bool {
+func dirAddedOrRemoved(sys any) bool {
 	ev, ok := sys.(*unix.InotifyEvent)
 	if !ok {
 		return false

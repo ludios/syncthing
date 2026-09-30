@@ -52,7 +52,6 @@ func TestMain(m *testing.M) {
 
 	exitCode := m.Run()
 
-	backendBuffer = 500
 	os.RemoveAll(testDir)
 
 	os.Exit(exitCode)
@@ -608,7 +607,7 @@ func testWatchOutput(t *testing.T, name string, in <-chan Event, expectedEvents,
 
 func TestEnclosingGitDir(t *testing.T) {
 	for name, want := range map[string]string{
-		".git":                    ".git",
+		".git":                    "",
 		".git/objects/ab":         ".git",
 		"sub/.git/refs/heads/foo": "sub/.git",
 		"a/.git/b/.git/c":         "a/.git",
@@ -649,18 +648,22 @@ func TestWatchGitDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []func() error{
-		func() error { return testFs.Mkdir(filepath.Join(objects, "ab"), 0o755) },
-		func() error { return testFs.Remove(filepath.Join(objects, "cd")) },
-		func() error { return testFs.Rename(filepath.Join(objects, "ef"), filepath.Join(objects, "gh")) },
-		func() error { return testFs.Chmod(refs, 0o700) },
-		func() error { return testFs.Mkdir(filepath.Join(name, "other"), 0o755) },
-	} {
-		if err := op(); err != nil {
-			t.Fatal(err)
+	// Make the changes while events are being read below: they cause about as
+	// many backend events as the test backend buffer holds.
+	go func() {
+		for _, op := range []func() error{
+			func() error { return testFs.Mkdir(filepath.Join(objects, "ab"), 0o755) },
+			func() error { return testFs.Remove(filepath.Join(objects, "cd")) },
+			func() error { return testFs.Rename(filepath.Join(objects, "ef"), filepath.Join(objects, "gh")) },
+			func() error { return testFs.Chmod(refs, 0o700) },
+			func() error { return testFs.Mkdir(filepath.Join(name, "other"), 0o755) },
+		} {
+			if err := op(); err != nil {
+				panic(err)
+			}
 		}
-	}
-	createTestFile(gitDir, "index")
+		createTestFile(gitDir, "index")
+	}()
 
 	want := map[Event]bool{
 		{gitDir, NonRemove}:                         true,
