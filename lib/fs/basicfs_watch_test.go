@@ -216,6 +216,30 @@ func TestWatchOutside(t *testing.T) {
 }
 
 func expectErrorForPath(t *testing.T, path string) {
+	expectWatchError(t, fakeEventInfo(path))
+}
+
+// TestWatchErrorFromBackend checks that a directory notify could not watch
+// after Watch returned stops the watch with an error, which says to raise the
+// inotify limits if they were hit.
+func TestWatchErrorFromBackend(t *testing.T) {
+	err := expectWatchError(t, &notify.WatchError{Err: &os.PathError{
+		Op:   "watch",
+		Path: filepath.Join(testDirAbs, "dir"),
+		Err:  syscall.ENOSPC,
+	}})
+	if err == nil {
+		return
+	}
+	if build.IsLinux != strings.Contains(err.Error(), "increase inotify limits") {
+		t.Errorf("Unexpected error %v", err)
+	}
+}
+
+// expectWatchError returns the error watchLoop stops with when the backend
+// sends ev, or nil after failing t.
+func expectWatchError(t *testing.T, ev notify.EventInfo) error {
+	t.Helper()
 	outChan := make(chan Event)
 	backendChan := make(chan notify.EventInfo, backendBuffer)
 	errChan := make(chan error)
@@ -235,16 +259,17 @@ func expectErrorForPath(t *testing.T, path string) {
 		<-done
 	}()
 
-	backendChan <- fakeEventInfo(path)
+	backendChan <- ev
 
 	select {
 	case <-time.After(10 * time.Second):
 		t.Errorf("Timed out before receiving error")
 	case e := <-outChan:
 		t.Errorf("Unexpected passed through event %v", e)
-	case <-errChan:
-	case <-ctx.Done():
+	case err := <-errChan:
+		return err
 	}
+	return nil
 }
 
 func TestWatchSubpath(t *testing.T) {

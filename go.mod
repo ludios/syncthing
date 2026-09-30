@@ -120,7 +120,9 @@ tool (
 
 // Branch prime of this fork fixes the inotify watcher missing changes: it
 // recovers from queue overflows, and it watches directories recreated where
-// one was removed (syncthing#7879, #9612). Drop it once upstream notify does.
+// one was removed (syncthing#7879, #9612); it also reports directories it
+// cannot watch later with notify.WatchError, which lib/fs uses. Drop it once
+// upstream notify does.
 // To pin prime's current head:
 // go mod edit -replace github.com/syncthing/notify=github.com/ludios/notify@prime && go mod tidy
 replace github.com/syncthing/notify => github.com/ludios/notify v0.0.0-20260930063654-6df961a93da2

@@ -55,10 +55,7 @@ func (f *BasicFilesystem) Watch(name string, ignore Matcher, ctx context.Context
 	err = notify.WatchWithFilter(watchPath, backendChan, absShouldIgnore, eventMask)
 	if err != nil {
 		notify.Stop(backendChan)
-		if reachedMaxUserWatches(err) {
-			err = errors.New("failed to set up inotify handler. Please increase inotify limits, see https://docs.syncthing.net/users/faq.html#inotify-limits")
-		}
-		return nil, nil, err
+		return nil, nil, explainWatchError(err)
 	}
 
 	errChan := make(chan error)
@@ -97,6 +94,15 @@ func (f *BasicFilesystem) watchEvent(relPath string, ev notify.EventInfo) Event 
 	return Event{Name: relPath, Type: f.eventType(ev.Event())}
 }
 
+// explainWatchError returns err, or if it means that the inotify limits were
+// reached, an error saying to increase them.
+func explainWatchError(err error) error {
+	if reachedMaxUserWatches(err) {
+		return errors.New("failed to set up inotify handler. Please increase inotify limits, see https://docs.syncthing.net/users/faq.html#inotify-limits")
+	}
+	return err
+}
+
 func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []string, backendChan chan notify.EventInfo, outChan chan<- Event, errChan chan<- error, ignore Matcher) {
 	for {
 		// Detect channel overflow
@@ -116,6 +122,13 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 
 		select {
 		case ev := <-backendChan:
+			// notify could not watch a directory after Watch returned, so
+			// changes in it would go unnoticed.
+			if werr, ok := ev.(*notify.WatchError); ok {
+				f.stopWatch(ctx, backendChan, errChan, explainWatchError(werr.Err))
+				return
+			}
+
 			evPath := ev.Path()
 
 			if !utf8.ValidString(evPath) {
@@ -125,13 +138,7 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 
 			relPath, err := f.unrootedChecked(evPath, roots)
 			if err != nil {
-				select {
-				case errChan <- err:
-					l.Debugln(f.Type(), f.URI(), "Watch: Sending error", err)
-				case <-ctx.Done():
-				}
-				notify.Stop(backendChan)
-				l.Debugln(f.Type(), f.URI(), "Watch: Stopped due to", err)
+				f.stopWatch(ctx, backendChan, errChan, err)
 				return
 			}
 
@@ -154,6 +161,18 @@ func (f *BasicFilesystem) watchLoop(ctx context.Context, name string, roots []st
 			return
 		}
 	}
+}
+
+// stopWatch stops the backend watch after err, sending err on errChan unless
+// ctx is done first.
+func (f *BasicFilesystem) stopWatch(ctx context.Context, backendChan chan notify.EventInfo, errChan chan<- error, err error) {
+	select {
+	case errChan <- err:
+		l.Debugln(f.Type(), f.URI(), "Watch: Sending error", err)
+	case <-ctx.Done():
+	}
+	notify.Stop(backendChan)
+	l.Debugln(f.Type(), f.URI(), "Watch: Stopped due to", err)
 }
 
 func (*BasicFilesystem) eventType(notifyType notify.Event) EventType {
